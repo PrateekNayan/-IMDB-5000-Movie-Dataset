@@ -1,0 +1,190 @@
+---
+title: "Movie"
+author: "Prateek Nayan"
+date: "7/13/2020"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse,shiny, dplyr, tidyr, htmltools, plotly, shinyWidgets, lubridate, leaflet,stringr,ggrepel,corrplot,GGally)
+```
+
+```{r}
+movie = read.csv("movie_metadata.csv")
+str(movie)
+sum(duplicated(movie))
+movie = movie[!duplicated(movie),]
+str(movie)
+colSums(sapply(movie, is.na))
+movie <- movie[!is.na(movie$gross), ]
+movie <- movie[!is.na(movie$budget), ]
+
+movie$movie_title = gsub("Â", "", as.character(factor(movie$movie_title)))
+str_trim(movie$movie_title, side = "right")
+```
+
+
+
+```{r Tab1}
+movie = na.omit(movie)
+
+movie$profit = ( movie$gross - movie$budget)
+movie$ROI = (movie$profit/movie$budget) * 100
+
+table(movie$country)
+
+levels(movie$country) <- c(levels(movie$country), "Outside-USA")
+movie$country[(movie$country != 'USA')] <- 'Outside-USA' 
+movie$country <- factor(movie$country)
+table(movie$country)
+
+t = table(movie$ROI, movie$country)
+barplot(t,main="USA vs Outside USA",xlab = "country", ylab = "ROI")
+```
+
+Question 1: To know if movie location has an impact on the profitability of the movie, I tried to do a barplot of US Vs Non-US countries. If we observe the country column most of the countries are from US and hence it is easier to distinguish countries as US and Non-US. From the plot it can be inferred that ROI% is more for countries in USA than in Non-USA. Yes, Movie location has an impact on profitability. Seeing the ROI% being significantly more for USA, it is better if more movies are produced inside USA
+```{r Tab2}
+library(dplyr)
+
+AD = data.frame(Actor = movie$actor_1_name, Director=movie$director_name,Profit= movie$profit, ROI =movie$ROI)
+
+AD%>% group_by(AD$Actor,AD$Director)%>% summarise(c = (ROI))%>% arrange(desc(c))
+
+```
+Question 2: "Micah Sloat" and "Orean Peli" - Actor-Director combination delivered the most profitable movies during the time period covered in this dataset based on ROI%
+
+```{r Tab3}
+movie %>%
+  plot_ly(x = ~title_year, y = ~imdb_score , mode = "markers", alpha = 0.7, type = "scatter")
+
+movie %>%
+  plot_ly(x = ~director_name, y = ~imdb_score , mode = "markers", alpha = 0.7, type = "scatter")
+
+movie %>%
+  plot_ly(x = ~movie_facebook_likes, y = ~imdb_score, mode = "markers", alpha = 0.7, type = "scatter")
+
+movie %>%
+  plot_ly(x = ~num_critic_for_reviews, y = ~imdb_score , mode = "markers", alpha = 0.7, type = "scatter")
+
+movie %>%
+  plot_ly(x = ~duration, y = ~imdb_score , mode = "markers", alpha = 0.7, type = "scatter")
+
+movie %>%
+  plot_ly(x = ~director_facebook_likes, y = ~imdb_score , mode = "markers", alpha = 0.7, type = "scatter")
+
+movie %>%
+  plot_ly(x = ~profit, y = ~imdb_score , mode = "markers", alpha = 0.7, type = "scatter")
+
+movie %>%
+  plot_ly(x = ~content_rating, y = ~imdb_score , mode = "markers", alpha = 0.7, type = "scatter")
+```
+Question 3 : The following variables are seen to influence the IMDB score the most - Budget, Title_year, Duration, Gross.
+
+Budget : It can be notied that as Budget increased, IMDB score has increased too.
+Duration : If the duration of the movie was optimum like within 2 hrs, IMDB rating was found to be high. If the duration of the movie was long (>3 hours) IMDB rating was found to be slightly lower.
+Title_Year : We can notice that all the movies were directed after the yeat 1990
+
+```{r Tab4}
+movie %>%
+  plot_ly(x = ~movie_facebook_likes, y = ~budget, mode = "markers",alpha = 0.7, type = "scatter")
+
+movie %>%
+  plot_ly(x = ~(actor_1_facebook_likes), y = ~(budget), mode = "markers",alpha = 0.7, type = "scatter")
+
+movie %>%
+  plot_ly(x = ~(actor_2_facebook_likes), y = ~(budget), mode = "markers",alpha = 0.7, type = "scatter")
+
+movie %>%
+  plot_ly(x = ~(actor_3_facebook_likes), y = ~(budget), mode = "markers",alpha = 0.7, type = "scatter")
+
+#Heatmap
+ggcorr(movie[,c("movie_facebook_likes","actor_1_facebook_likes","actor_2_facebook_likes","actor_3_facebook_likes","budget")])
+
+```
+
+Question 4: To infer if Facebook likes for the movie and/or actors depend on the budget of the movie i used a heatmap. We can infer that there 0 or no corelation between these variables and budget.
+
+```{r Shiny App}
+
+
+ui <- fluidPage(
+  titlePanel("Movie dataset"),
+  
+  # Sidebar layout with a input and output definitions 
+
+    # Main panel for displaying outputs
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Usa vs Non Usa - profitability", 
+                 plotOutput("Frequency")),
+        
+        tabPanel("Actor-Director most profit", 
+                selectInput(
+                  inputId = "Number", 
+                  label= "No of movies",
+                  choices = 1:10
+                ),
+                 tableOutput(outputId = "TableOutput")),
+        tabPanel("variables influencing IMDB rating",
+                plotOutput("budget"),
+                plotOutput("duration"),
+                plotOutput("year")
+                ),
+        tabPanel("Budget",
+                plotOutput("fact")
+                )
+      )
+    )
+)
+
+server <- function(input, output) {
+
+  # US vs Non-Us
+  output$Frequency <- renderPlot({
+                    barplot(t,main="USA vs Outside USA",xlab = "country", ylab = "ROI")
+    })
+  
+#Most Profitable Movies
+  output$TableOutput<-renderTable({
+   p = AD%>% group_by(AD$Actor,AD$Director)%>% summarise(c = (ROI))%>% arrange(desc(c))
+   p$number = 1:3768
+   p[1:input$Number,]
+  })
+  
+#Factors affecting IMDB rating
+  output$budget<-renderPlot({
+            ggplot(movie, aes(x=movie$budget, y=movie$imdb_score))+geom_point()
+    
+  })
+  
+  
+  output$duration = renderPlot({
+            ggplot(movie, aes(x=movie$duration,y=movie$imdb_score))+geom_point()
+  
+  })
+  
+  output$year = renderPlot({
+            ggplot(movie, aes(x=movie$title_year,y=movie$imdb_score))+geom_point()
+  
+  })
+
+ #Budget vs facebook likes for actor and movies
+    output$fact<-renderPlot({
+     
+ggcorr(movie[,c("movie_facebook_likes","actor_1_facebook_likes","actor_2_facebook_likes","actor_3_facebook_likes","budget")])
+    
+  })
+  
+}
+
+# Create a Shiny app object
+shinyApp(ui = ui, server = server)
+
+```
+
